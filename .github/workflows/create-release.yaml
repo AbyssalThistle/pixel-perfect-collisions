@@ -1,0 +1,100 @@
+on:
+  push:
+    tags: 'v*'
+    branches: master
+
+name: create release
+
+env:
+  AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+  AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+  BUCKET: ${{ secrets.AWS_S3_BUCKET }}
+
+jobs:
+  build:
+    name: create release
+    runs-on: ubuntu-latest
+    steps:
+      - name: checkout submodules
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: actions/checkout@v2
+        with:
+          token: ${{ secrets.GH_TOKEN }}
+          submodules: true
+
+      - name: set aws credentials
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: aws-actions/configure-aws-credentials@v1
+        with:
+          aws-access-key-id: ${{ secrets.S3_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.S3_SECRET_ACCESS_KEY }}
+          aws-region: eu-west-1
+
+      - name: get artifacts (s3)
+        id: get_artifacts
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          PROJECT=$(basename $(git rev-parse --show-toplevel))
+          TAG_COMMIT_SHA=$(git show-ref --tags | grep '${{ github.ref }}' | cut -d' '  -f1)
+          TAG_BARE=$(echo '${{ github.ref }}' | cut -d'/' -f3)
+          aws s3 cp s3://${{ secrets.BUCKET }}/windows/$PROJECT-$TAG_COMMIT_SHA.zip $TAG_BARE-windows.zip
+          aws s3 cp s3://${{ secrets.BUCKET }}/osx/$PROJECT-$TAG_COMMIT_SHA.zip $TAG_BARE-osx.zip
+          aws s3 cp s3://${{ secrets.BUCKET }}/linux/$PROJECT-$TAG_COMMIT_SHA.zip $TAG_BARE-linux.zip
+          aws s3 cp s3://${{ secrets.BUCKET }}/web/$PROJECT-$TAG_COMMIT_SHA.zip $TAG_BARE-web.zip
+          echo ::set-output name=VERSION::$TAG_BARE
+
+      - name: create release
+        if: startsWith(github.ref, 'refs/tags/v')
+        id: create-release
+        uses: actions/create-release@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }} # This token is provided by Actions, you do not need to create your own token
+        with:
+          tag_name: ${{ github.ref }}
+          release_name: Release ${{ github.ref }}
+          draft: true
+          prerelease: false
+
+      - name: upload release artifact (linux)
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GH_TOKEN }}
+        with:
+          upload_url: ${{ steps.create-release.outputs.upload_url }}
+          asset_path: ./${{ steps.get_artifacts.outputs.VERSION }}-linux.zip
+          asset_name: ${{ steps.get_artifacts.outputs.VERSION }}-linux.zip
+          asset_content_type: application/zip
+
+      - name: upload release artifact (osx)
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GH_TOKEN }}
+        with:
+          upload_url: ${{ steps.create-release.outputs.upload_url }}
+          asset_path: ./${{ steps.get_artifacts.outputs.VERSION }}-osx.zip
+          asset_name: ${{ steps.get_artifacts.outputs.VERSION }}-osx.zip
+          asset_content_type: application/zip
+
+      - name: upload release artifact (windows)
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GH_TOKEN }}
+        with:
+          upload_url: ${{ steps.create-release.outputs.upload_url }}
+          asset_path: ./${{ steps.get_artifacts.outputs.VERSION }}-windows.zip
+          asset_name: ${{ steps.get_artifacts.outputs.VERSION }}-windows.zip
+          asset_content_type: application/zip
+
+      - name: upload release artifact (web)
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GH_TOKEN }}
+        with:
+          upload_url: ${{ steps.create-release.outputs.upload_url }}
+          asset_path: ./${{ steps.get_artifacts.outputs.VERSION }}-web.zip
+          asset_name: ${{ steps.get_artifacts.outputs.VERSION }}-web.zip
+          asset_content_type: application/zip

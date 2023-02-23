@@ -1,0 +1,191 @@
+name: pipeline
+
+on:
+  pull_request:
+    branches:
+      - master
+      - develop
+      - feat/ci
+
+env:
+  AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+  AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+  BUCKET: ${{ secrets.AWS_S3_BUCKET }}
+
+jobs:
+  ci:
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        name: [
+          linux,
+          osx,
+          windows,
+          web
+        ]
+
+        include:
+          - name: linux
+            os: ubuntu-latest
+            compiler: gcc
+          - name: osx
+            os: macOS-latest
+            compiler: clang
+          - name: windows
+            os: windows-latest
+            compiler: x86_64-w64-mingw32-gcc.exe
+          - name: web
+            os: ubuntu-latest
+            compiler: emcc
+
+    steps:
+      - name: checkout submodules
+        uses: actions/checkout@v2
+        with:
+          token: ${{ secrets.GH_TOKEN }}
+          submodules: true
+
+      - name: set aws credentials
+        uses: aws-actions/configure-aws-credentials@v1
+        with:
+          aws-access-key-id: ${{ secrets.S3_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.S3_SECRET_ACCESS_KEY }}
+          aws-region: eu-west-1
+
+      - name: confirm github environment variables
+        run: |
+          echo "GITHUB_RUN_ID $GITHUB_RUN_ID"
+          echo "GITHUB_SHA $GITHUB_SHA"
+          echo "GITHUB_HEAD_REF $GITHUB_HEAD_REF"
+          echo "GITHUB_BASE_REF $GITHUB_BASE_REF"
+        shell: bash
+
+      - name: set environment variables (shared)
+        run: |
+          echo "proj=${GITHUB_REPOSITORY#*/}" >> $GITHUB_ENV
+        shell: bash
+
+      - name: set environment variables (dev)
+        if: ${{ github.base_ref != 'master' }}
+        run: |
+          echo "suffix=-dev" >> $GITHUB_ENV
+          echo "buildType=DEBUG" >> $GITHUB_ENV
+        shell: bash
+
+      - name: set environment variables (prod)
+        if: ${{ github.base_ref == 'master' }}
+        run: |
+          echo "suffix=" >> $GITHUB_ENV
+          echo "buildType=RELEASE" >> $GITHUB_ENV
+        shell: bash
+
+      - name: install dependencies (ubuntu)
+        if: startsWith(matrix.os, 'ubuntu')
+        run: |
+          sudo apt-get update
+          sudo apt-get install build-essential git --yes
+          sudo apt-get install gcc-multilib mingw-w64 --yes
+          sudo apt-get install libasound2-dev mesa-common-dev libx11-dev libxrandr-dev libxi-dev xorg-dev libgl1-mesa-dev libglu1-mesa-dev --yes
+
+      - name: install dependencies (web)
+        if: startsWith(matrix.name, 'web')
+        run: |
+          git clone https://github.com/emscripten-core/emsdk.git
+          cd emsdk
+          ./emsdk install latest
+          ./emsdk activate latest
+          source emsdk_env.sh
+          emcc --version
+          cd ..
+
+
+      - name: install dependencies (macOS)
+        if: startsWith(matrix.os, 'macOS')
+        run: |
+          echo "done?"
+
+      - name: install dependencies (windows)
+        if: startsWith(matrix.os, 'windows')
+        run: |
+          set PATH=%PATH%;C:\\msys64\\mingw32\\bin
+        shell: cmd
+
+      - name: compiler version check
+        if: startsWith(matrix.name, 'web') != true
+        run: ${{ matrix.compiler }} --version
+
+      - name: compiler version check (web)
+        if: startsWith(matrix.name, 'web')
+        run: |
+          source emsdk/emsdk_env.sh
+          ${{ matrix.compiler }} --version
+
+      - name: raylib-game
+        if: startsWith(matrix.os, 'windows') != true && startsWith(matrix.name, 'web') != true
+        run: |
+          CC=${{ matrix.compiler }} CMAKE_BUILD_TYPE=${{ env.buildType }} cmake -B ${{ matrix.name }}${{ env.suffix }} && make -C ${{ matrix.name }}${{ env.suffix }}
+      - name: raylib-game (windows)
+        if: startsWith(matrix.os, 'windows')
+        run: |
+          cmake -G "MinGW Makefiles" -D CMAKE_C_COMPILER=${{ matrix.compiler }} -D CMAKE_C_FLAGS="-mwindows" -B ${{ matrix.name }}${{ env.suffix }}
+          cmake --build ${{ matrix.name }}${{ env.suffix }} --config ${{ env.buildType }}
+        shell: cmd
+
+      - name: raylib-game (web)
+        if: startsWith(matrix.name, 'web')
+        run: |
+          source emsdk/emsdk_env.sh
+          CMAKE_BUILD_TYPE=${{ env.buildType }} emcmake cmake -S . -B ${{ matrix.name }}${{ env.suffix }} -DPLATFORM=Web
+          make -C ${{ matrix.name }}${{ env.suffix }}
+
+      - name: prep package
+        run: |
+          DST_DIR=${{ env.proj }}-${{ matrix.name }}${{ env.suffix }}
+          SRC_DIR=${{ matrix.name }}${{ env.suffix }}
+          mkdir ${DST_DIR}
+          cp ${SRC_DIR}/game* ${DST_DIR}
+          cp -r assets/ ${DST_DIR}
+        shell: bash
+
+      - name: prep package (unix)
+        if: startsWith(matrix.os, 'windows')  != true && startsWith(matrix.name, 'web') != true
+        run: |
+          DST_DIR=${{ env.proj }}-${{ matrix.name }}${{ env.suffix }}
+          chmod +x ${DST_DIR}/game
+
+      - name: prep package (windows)
+        if: startsWith(matrix.os, 'windows')
+        run: |
+          copy C:\\msys64\\mingw64\\bin\\libwinpthread-1.dll ${{ env.proj }}-${{ matrix.name }}${{ env.suffix }}
+        shell: cmd
+
+      - name: prep package (web)
+        if: startsWith(matrix.name, 'web')
+        run: |
+          DST_DIR=${{ env.proj }}-${{ matrix.name }}${{ env.suffix }}
+          mv ${DST_DIR}/game.html ${DST_DIR}/index.html
+        shell: bash
+
+      - name: package
+        if: startsWith(matrix.name, 'web') != true
+        uses: AbyssalThistle/zip-release@master
+        with:
+          type: 'zip'
+          filename: "${{ env.proj }}-${{ matrix.name }}${{ env.suffix }}.zip"
+          path: "${{ env.proj }}-${{ matrix.name }}${{ env.suffix }}/"
+
+      - name: package
+        if: startsWith(matrix.name, 'web')
+        uses: AbyssalThistle/zip-release@master
+        with:
+          type: 'zip'
+          filename: "${{ env.proj }}-${{ matrix.name }}${{ env.suffix }}.zip"
+          directory: "${{ env.proj }}-${{ matrix.name }}${{ env.suffix }}/"
+
+      - name: upload artifact (s3)
+        run: |
+          ZIP=${{ env.proj }}-${{ matrix.name }}${{ env.suffix }}.zip
+          aws s3 cp $ZIP s3://${{ secrets.BUCKET }}/${{ matrix.name }}/${{ env.proj }}-${{ github.event.pull_request.head.sha }}.zip
+        shell: bash

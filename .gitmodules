@@ -1,0 +1,12 @@
+[submodule "vendor/raylib"]
+	path = vendor/raylib
+	url = git@github.com:raysan5/raylib.git
+[submodule "vendor/clogs"]
+	path = vendor/clogs
+	url = git@github.com:AbyssalThistle/clogs.git
+[submodule "vendor/vector"]
+	path = vendor/vector
+	url = git@github.com:AbyssalThistle/vector.git
+[submodule "vendor/raylibExtras"]
+	path = vendor/raylibExtras
+	url = git@github.com:AbyssalThistle/raylibExtras.git

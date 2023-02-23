@@ -1,0 +1,44 @@
+on:
+  release:
+    types: [published]
+
+name: itch publish
+
+env: 
+  BUTLER_API_KEY: ${{ secrets.ITCH_TOKEN }}
+
+jobs:
+  build:
+    name: itch publish
+    runs-on: ubuntu-latest
+    steps:
+      - name: checkout repo
+        uses: actions/checkout@v2
+        with:
+          token: ${{ secrets.GH_TOKEN }}
+
+      - name: get artifacts
+        uses: AbyssalThistle/release-downloader@v1.3
+        with:
+          repository: ${{ github.repository }}
+          tag: ${{ github.ref_name }}
+          fileName: '*'
+          zipBall: true
+          token: ${{ secrets.GH_TOKEN }}
+
+      - name: setup butler
+        run: |
+          wget -O butler-latest.zip https://broth.itch.ovh/butler/linux-amd64/LATEST/archive/default
+          unzip butler-latest.zip
+          chmod +x butler
+          ./butler -V
+
+      - name: itch upload
+        run: |
+          PROJECT=$(basename $(git rev-parse --show-toplevel))
+          USER=$(echo "${{ github.repository }}" | grep -oE "^\w+")
+          TAG=${{ github.ref_name }}
+          [ -z $TAG-web.zip ] || ./butler push $TAG-web.zip $USER/$PROJECT:web --userversion $TAG
+          [ -z $TAG-windows.zip ] || ./butler push $TAG-windows.zip $USER/$PROJECT:windows --userversion $TAG
+          [ -z $TAG-osx.zip ] || ./butler push $TAG-osx.zip $USER/$PROJECT:osx --userversion $TAG
+          [ -z $TAG-linux.zip ] || ./butler push $TAG-linux.zip $USER/$PROJECT:linux --userversion $TAG
