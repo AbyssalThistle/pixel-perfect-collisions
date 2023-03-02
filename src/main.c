@@ -126,8 +126,8 @@ void UpdateDrawFrame(void)
 	uint8_t *bP = rlReadTexturePixels(bMask.id, bMask.width, bMask.height,
 			RL_PIXELFORMAT_UNCOMPRESSED_GRAYSCALE);
 
-	for(int y = 0; y < rows; ++y) {
-		for(int x = 0; x < columns; ++x) {
+	for(int y = 0; y < columns; ++y) {
+		for(int x = 0; x < rows; ++x) {
 			if(	aP[(int)((aLocalPos.x + x) + (aLocalPos.y + y) * aMask.width)] &&
 				bP[(int)((bLocalPos.x + x) + (bLocalPos.y + y) * bMask.width)])
 			{
